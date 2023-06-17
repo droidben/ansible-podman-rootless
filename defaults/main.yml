@@ -1,0 +1,6 @@
+---
+# defaults file for roles/podman
+container_run_as_user: rootless_user
+container_run_as_group: rootless_user
+skip_podman_install: false
+systemd_scope: system

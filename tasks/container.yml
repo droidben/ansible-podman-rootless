@@ -1,0 +1,76 @@
+---
+- name: Get user information
+  ansible.builtin.user:
+    name: "{{ container_run_as_user }}"
+  check_mode: true
+  changed_when: false
+  register: user_info
+
+- name: Set systemd runtime dir
+  ansible.builtin.set_fact:
+    xdg_runtime_dir: "/run/user/{{ user_info.uid }}"
+  changed_when: false
+
+- name: ensure container_mounts exist on host
+  ansible.builtin.file:
+    name: "{{ item }}"
+    state: directory
+    owner: "{{ container_run_as_user }}"
+    group: "{{ container_run_as_group }}"
+    mode: "0750"
+  become: true
+  with_items: "{{ container_mounts }}"
+
+- name: Ensure container's exposed ports firewall state
+  tags: firewall
+  ansible.posix.firewalld:
+    port: "{{ item.host_port }}/{{ item.proto }}"
+    permanent: true
+    immediate: true
+    #state: "{% if container_state == 'running' %}enabled{% else %}disabled{% endif %}"
+    state: enabled
+  become: true
+  with_items: "{{ container_firewall_ports }}"
+
+- name: create container with systemd file
+  containers.podman.podman_container:
+    name: "{{ container_name }}"
+    image: "{{ container_image }}"
+    state: created
+    recreate: yes
+    generate_systemd:
+      path: "{{ user_info.home }}/.config/systemd/user"
+      restart_policy: always
+      time: 120
+      new: true
+      names: true
+      container_prefix: podman
+    ports: "{{ container_ports }}"
+    volume: "{{ container_volumes }}"
+  become: true
+  become_user: "{{ container_run_as_user }}"
+  
+- name: Ensure service is enabled and running
+  become: true
+  become_user: "{{ container_run_as_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "{{ xdg_runtime_dir }}"
+  ansible.builtin.systemd:
+    name: "podman-{{ container_name }}"
+    state: started
+    scope: user
+    enabled: true
+    daemon_reload: true
+
+- name: Ensure auto update is running for images
+  become: true
+  become_user: "{{ container_run_as_user }}"
+  environment:
+    XDG_RUNTIME_DIR: "{{ xdg_runtime_dir }}"
+  ansible.builtin.systemd:
+    name: podman-auto-update.timer
+    daemon_reload: true
+    state: started
+    enabled: true
+    scope: user
+

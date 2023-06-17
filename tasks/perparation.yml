@@ -1,0 +1,92 @@
+---
+
+- name: Get user information
+  ansible.builtin.user:
+    name: "{{ container_run_as_user }}"
+  check_mode: true
+  changed_when: false
+  register: user_info
+
+- name: Fail if user doesn't exist
+  ansible.builtin.fail:
+    msg: User "{{ container_run_as_user }}" doesn't exist.
+  when: user_info.name is not defined
+
+
+- name: Prepare rootless stuff if needed
+  when: container_run_as_user != "root"
+  block:
+    - name: Set systemd dir if user is not root
+      ansible.builtin.set_fact:
+        service_files_dir: "{{ user_info.home }}/.config/systemd/user"
+        systemd_scope: user
+      changed_when: false
+
+    - name: Ensure systemd files directory exists if user not root
+      ansible.builtin.file:
+        path: "{{ service_files_dir }}"
+        state: directory
+        owner: "{{ container_run_as_user }}"
+        group: "{{ container_run_as_group }}"
+      become: true
+      become_user: "{{ container_run_as_user }}"
+
+
+- name: Set systemd runtime dir
+  ansible.builtin.set_fact:
+    xdg_runtime_dir: "/run/user/{{ user_info.uid }}"
+  changed_when: false
+
+- name: Set systemd scope to system if needed
+  ansible.builtin.set_fact:
+    systemd_scope: system
+    service_files_dir: "{{ service_files_dir }}"
+  when: container_run_as_user == "root"
+  changed_when: false
+
+- name: Create local systemd directory
+  ansible.builtin.file:
+    group: root
+    mode: u=rwX,go=rX
+    owner: root
+    path: /usr/local/lib/systemd/system/
+    state: directory
+  become: true
+  when: container_run_as_user == "root" and service_files_dir == '/usr/local/lib/systemd/system'
+
+- name: Ensure podman is installed
+  ansible.builtin.package:
+    name: podman
+    state: present
+  when: not skip_podman_install
+  become: true
+  become_user: root
+
+- name: Check if user is lingering
+  ansible.builtin.stat:
+    path: "/var/lib/systemd/linger/{{ container_run_as_user }}"
+  register: user_lingering
+  when: container_run_as_user != "root"
+
+- name: Enable lingering is needed
+  ansible.builtin.command: "loginctl enable-linger {{ container_run_as_user }}"
+  when:
+    - container_run_as_user != "root"
+    - not user_lingering.stat.exists
+  become: true
+  become_user: root
+
+- name: Ensure firewalld is installed
+  tags: firewall
+  ansible.builtin.package:
+    name: firewalld
+    state: present
+  become: true
+
+- name: Ensure firewall service is running and enabled
+  tags: firewall
+  ansible.builtin.service: 
+    name: firewalld
+    state: started
+    enabled: true
+  become: true
