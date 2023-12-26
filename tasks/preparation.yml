@@ -1,5 +1,35 @@
 ---
 
+- name: install prerequisites
+  block:
+    - name: Install packages
+      ansible.builtin.package:
+        name: "{{ item }}"
+        state: present
+      become: true
+      become_user: root
+      loop:
+        - podman
+        - slirp4netns
+        - shadow-utils
+  when: install_prerequisites
+
+- name: Ensure group is created
+  group:
+    name: "{{ container_run_as_group }}"
+    state: present
+  become: true
+  become_user: root
+
+- name: Ensure user is present and added to group
+  user:
+    name: "{{ container_run_as_user }}"
+    state: present
+    groups: "{{ container_run_as_group }}"
+    append: true
+  become: true
+  become_user: root
+
 - name: Get user information
   ansible.builtin.user:
     name: "{{ container_run_as_user }}"
@@ -11,7 +41,6 @@
   ansible.builtin.fail:
     msg: User "{{ container_run_as_user }}" doesn't exist.
   when: user_info.name is not defined
-
 
 - name: Prepare rootless stuff if needed
   when: container_run_as_user != "root"
@@ -31,6 +60,15 @@
       become: true
       become_user: "{{ container_run_as_user }}"
 
+    - name: Enable unprivileges ports below 1024
+      ansible.posix.sysctl:
+        name: net.ipv4.ip_unprivileged_port_start
+        value: '0'
+        state: present
+        sysctl_file: /etc/sysctl.conf
+        reload: true
+      become: true
+      become_user: root
 
 - name: Set systemd runtime dir
   ansible.builtin.set_fact:
@@ -52,15 +90,8 @@
     path: /usr/local/lib/systemd/system/
     state: directory
   become: true
-  when: container_run_as_user == "root" and service_files_dir == '/usr/local/lib/systemd/system'
-
-- name: Ensure podman is installed
-  ansible.builtin.package:
-    name: podman
-    state: present
-  when: not skip_podman_install
-  become: true
   become_user: root
+  when: container_run_as_user == "root" and service_files_dir == '/usr/local/lib/systemd/system'
 
 - name: Check if user is lingering
   ansible.builtin.stat:
@@ -76,17 +107,20 @@
   become: true
   become_user: root
 
-- name: Ensure firewalld is installed
-  tags: firewall
-  ansible.builtin.package:
-    name: firewalld
-    state: present
-  become: true
+# The below might be useful if using local firewalls
+# Specifically using firewalld, as in linux-system-roles/podman
 
-- name: Ensure firewall service is running and enabled
-  tags: firewall
-  ansible.builtin.service: 
-    name: firewalld
-    state: started
-    enabled: true
-  become: true
+#- name: Ensure firewalld is installed
+#  tags: firewall
+#  ansible.builtin.package:
+#    name: firewalld
+#    state: present
+#  become: true
+
+#- name: Ensure firewall service is running and enabled
+#  tags: firewall
+#  ansible.builtin.service: 
+#    name: firewalld
+#    state: started
+#    enabled: true
+#  become: true

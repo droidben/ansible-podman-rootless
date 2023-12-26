@@ -1,12 +1,9 @@
 ---
-# tasks file for podman
+
 - name: prepare system
-  ansible.builtin.import_tasks: perparation.yml
+  ansible.builtin.import_tasks: preparation.yml
   when: skip_preparation == false
     
 - name: Check subuid & subgid
   ansible.builtin.import_tasks: check_subid.yml
   when: skip_preparation == false
-
-- name: deploy container
-  ansible.builtin.import_tasks: container.yml
