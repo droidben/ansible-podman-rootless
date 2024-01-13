@@ -1,4 +1,4 @@
-Role Name
+ansible-podman-rootless
 =========
 
 This ansible role is to install podman and enable rootless mode for the specified user.
